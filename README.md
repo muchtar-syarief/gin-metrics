@@ -30,7 +30,7 @@ Below is the detailed description for every metric.
 
 
 ## Special Thanks
-This is project based from [here]("https://github.com/penglongli/gin-metrics")
+This is project based from [here](https://github.com/penglongli/gin-metrics)
 
 ## Grafana
 

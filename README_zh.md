@@ -3,7 +3,7 @@
 gin-gonic/gin metrics exporter for Prometheus.
 
 ## Special Thanks
-This is project based from [here]("https://github.com/penglongli/gin-metrics")
+This is project based from [here](https://github.com/penglongli/gin-metrics)
 
 ## Introduction
 
