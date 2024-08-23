@@ -4,6 +4,7 @@ gin-gonic/gin metrics exporter for Prometheus.
 [中文](README_zh.md)
 
 - [Introduction](#Introduction)
+- [Special Thanks](#Special-Thanks)
 - [Grafana](#Grafana)
 - [Installation](#Installation)
 - [Usage](#Usage)
@@ -28,23 +29,24 @@ Below is the detailed description for every metric.
 | gin_slow_request_total  | Counter   | the server handled slow requests counter, t=%d.     |
 
 
+## Special Thanks
+This is project based from [here]("https://github.com/penglongli/gin-metrics")
+
 ## Grafana
 
 
 Set the `grafana` directory for details.
 
 ![grafana](./grafana/grafana.png)
-
-
 ## Installation
 
 ```bash
-$ go get github.com/penglongli/gin-metrics
+$ go get github.com/muchtar-syarief/gin-metrics
 ```
 
 ## Usage
 
-Your can see some metrics across `http://localhost:8080/metrics`
+使用如下代码运行，访问：`http://localhost:8080/metrics` 即可看到暴露出来的监控指标
 
 ```go
 package main
@@ -52,24 +54,26 @@ package main
 import (
 	"github.com/gin-gonic/gin"
 
-	"github.com/penglongli/gin-metrics/ginmetrics"
+	"github.com/muchtar-syarief/gin-metrics/ginmetrics"
 )
 
 func main() {
 	r := gin.Default()
 
 	// get global Monitor object
-	m := ginmetrics.GetMonitor()
+	m := ginmetrics.NewDefaultMonitor()
 
-	// +optional set metric path, default /debug/metrics
-	m.SetMetricPath("/metrics")
-	// +optional set slow time, default 5s
-	m.SetSlowTime(10)
-	// +optional set request duration, default {0.1, 0.3, 1.2, 5, 10}
-	// used to p95, p99
-	m.SetDuration([]float64{0.1, 0.3, 1.2, 5, 10})
+	// use this function to register metric has define by repo
+	err := m.RegisterDefaultMetrics()
+	if err != nil {
+		panic(err)
+	}
 
-	// set middleware for gin
+	// if you want change the configuration you can use this function
+	m.SetMetricPath("/metrics"). // +optional set metric path, default /debug/metrics
+		SetSlowTime(10). // +optional set slow time, default 5s
+		SetDuration([]float64{0.1, 0.3, 1.2, 5, 10}) // +optional set request duration, default {0.1, 0.3, 1.2, 5, 10} used to p95, p99
+	
 	m.Use(r)
 
 	r.GET("/product/:id", func(ctx *gin.Context) {
@@ -77,20 +81,20 @@ func main() {
 			"productId": ctx.Param("id"),
 		})
 	})
-
 	_ = r.Run()
 }
+
 ```
 
 ## Custom Metric
 
-`gin-metric` provides ways to custom your own metric.
+`gin-metric` 提供了自定义监控指标的使用方式
 
 ### Gauge
 
-With `Gauge` type metric, you can use three functions to change it's value.
+使用 `Gauge` 类型监控指标，可以通过 3 种方法来修改监控值：`SetGaugeValue`、`Inc`、`Add`
 
-And you should define a `Gauge` Metric first, 
+首先，需要定义一个 `Gauge` 类型的监控指标：
 
 ```go
 gaugeMetric := &ginmetrics.Metric{
@@ -100,42 +104,65 @@ gaugeMetric := &ginmetrics.Metric{
     Labels:      []string{"label1"},
 }
 
-// Add metric to global monitor object
-_ = ginmetrics.GetMonitor().AddMetric(gaugeMetric)
+// Add metric to monitor object
+_ = m.AddMetric(gaugeMetric)
 ```
 
-**SetGaugeValue** 
+**SetGaugeValue**
 
-`SetGaugeValue` will setting metric value directly。
+`SetGaugeValue` 方法会直接设置监控指标的值
 
 ```go
-_ = ginmetrics.GetMonitor().GetMetric("example_gauge_metric").SetGaugeValue([]string{"label_value1"}, 0.1)
+metric, err := m.GetMetric("example_gauge_metric")
+if err != nil {
+	panic(err)
+}
+
+err =  metric.SetGaugeValue([]string{"label_value1"}, 0.1)
+if err != nil {
+	panic(err)
+}
 ```
 
 **Inc**
 
-`Inc` will increase 1 to metric value
+`Inc` 方法会在监控指标值的基础上增加 1
 
 ```go
-_ = ginmetrics.GetMonitor().GetMetric("example_gauge_metric").Inc([]string{"label_value1"})
+metric, err := m.GetMetric("example_gauge_metric")
+if err != nil {
+	panic(err)
+}
+
+err = metric.Inc([]string{"label_value1"})
+if err != nil {
+	panic(err)
+}
 ```
 
 **Add**
 
-`Add` will add float64 num to metric value
+`Add` 方法会为监控指标增加传入的值
 
 ```go
-_ = ginmetrics.GetMonitor().GetMetric("example_gauge_metric").Add([]string{"label_value1"}, 0.2)
+metric, err := m.GetMetric("example_gauge_metric")
+if err != nil {
+	panic(err)
+}
+
+err = metric.Add([]string{"label_value1"}, 0.2)
+if err != nil {
+	panic(err)
+}
 ```
 
 ### Counter
 
-With `Counter` type metric, you can use `Inc` and `Add` function, don't use `SetGaugeValue`.
-
+`Counter` 类型的监控指标，可以使用 `Inc` 和 `Add` 方法，但是不能使用 `SetGaugeValue` 方法
 
 ### Histogram and Summary
 
-For `Histogram` and `Summary` type metric, should use `Observe` function.
+对于 `Histogram` 和 `Summary` 类型的监控指标，需要用 `Observe` 方法来设置监控值。
 
 ## Metric with separate port
 

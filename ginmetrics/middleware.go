@@ -1,32 +1,16 @@
 package ginmetrics
 
 import (
-	"fmt"
+	"log"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
-	"github.com/penglongli/gin-metrics/bloom"
-)
-
-var (
-	metricRequestTotal    = "gin_request_total"
-	metricRequestUVTotal  = "gin_request_uv_total"
-	metricURIRequestTotal = "gin_uri_request_total"
-	metricRequestBody     = "gin_request_body_total"
-	metricResponseBody    = "gin_response_body_total"
-	metricRequestDuration = "gin_request_duration"
-	metricSlowRequest     = "gin_slow_request_total"
-
-	bloomFilter *bloom.BloomFilter
 )
 
 // Use set gin metrics middleware
 func (m *Monitor) Use(r gin.IRoutes) {
-	m.initGinMetrics()
-
 	r.Use(m.monitorInterceptor)
 	r.GET(m.metricPath, func(ctx *gin.Context) {
 		promhttp.Handler().ServeHTTP(ctx.Writer, ctx.Request)
@@ -37,7 +21,6 @@ func (m *Monitor) Use(r gin.IRoutes) {
 // It can be called multiple times to intercept from multiple gin.IRoutes
 // http path is not set, to do that use Expose function
 func (m *Monitor) UseWithoutExposingEndpoint(r gin.IRoutes) {
-	m.initGinMetrics()
 	r.Use(m.monitorInterceptor)
 }
 
@@ -47,55 +30,6 @@ func (m *Monitor) UseWithoutExposingEndpoint(r gin.IRoutes) {
 func (m *Monitor) Expose(r gin.IRoutes) {
 	r.GET(m.metricPath, func(ctx *gin.Context) {
 		promhttp.Handler().ServeHTTP(ctx.Writer, ctx.Request)
-	})
-}
-
-// initGinMetrics used to init gin metrics
-func (m *Monitor) initGinMetrics() {
-	bloomFilter = bloom.NewBloomFilter()
-
-	_ = monitor.AddMetric(&Metric{
-		Type:        Counter,
-		Name:        metricRequestTotal,
-		Description: "all the server received request num.",
-		Labels:      nil,
-	})
-	_ = monitor.AddMetric(&Metric{
-		Type:        Counter,
-		Name:        metricRequestUVTotal,
-		Description: "all the server received ip num.",
-		Labels:      nil,
-	})
-	_ = monitor.AddMetric(&Metric{
-		Type:        Counter,
-		Name:        metricURIRequestTotal,
-		Description: "all the server received request num with every uri.",
-		Labels:      []string{"uri", "method", "code"},
-	})
-	_ = monitor.AddMetric(&Metric{
-		Type:        Counter,
-		Name:        metricRequestBody,
-		Description: "the server received request body size, unit byte",
-		Labels:      nil,
-	})
-	_ = monitor.AddMetric(&Metric{
-		Type:        Counter,
-		Name:        metricResponseBody,
-		Description: "the server send response body size, unit byte",
-		Labels:      nil,
-	})
-	_ = monitor.AddMetric(&Metric{
-		Type:        Histogram,
-		Name:        metricRequestDuration,
-		Description: "the time server took to handle the request.",
-		Labels:      []string{"uri"},
-		Buckets:     m.reqDuration,
-	})
-	_ = monitor.AddMetric(&Metric{
-		Type:        Counter,
-		Name:        metricSlowRequest,
-		Description: fmt.Sprintf("the server handled slow requests counter, t=%d.", m.slowTime),
-		Labels:      []string{"uri", "method", "code"},
 	})
 }
 
@@ -111,42 +45,103 @@ func (m *Monitor) monitorInterceptor(ctx *gin.Context) {
 	ctx.Next()
 
 	// after request
-	m.ginMetricHandle(ctx, startTime)
+	err := m.ginMetricHandle(ctx, startTime)
+	if err != nil {
+		log.Printf("[ LOG ]: Handler metric error: %s", err)
+	}
 }
 
-func (m *Monitor) ginMetricHandle(ctx *gin.Context, start time.Time) {
+func (m *Monitor) ginMetricHandle(ctx *gin.Context, start time.Time) error {
 	r := ctx.Request
 	w := ctx.Writer
 
+	p := NewPararelAction()
+
 	// set request total
-	_ = m.GetMetric(metricRequestTotal).Inc(nil)
+	p.Add(func() error {
+		metric, err := m.GetMetric(metricRequestTotal)
+		if err != nil {
+			return err
+		}
+
+		return metric.Inc(nil)
+	})
 
 	// set uv
-	if clientIP := ctx.ClientIP(); !bloomFilter.Contains(clientIP) {
-		bloomFilter.Add(clientIP)
-		_ = m.GetMetric(metricRequestUVTotal).Inc(nil)
+	if clientIP := ctx.ClientIP(); !m.bloomFilter.Contains(clientIP) {
+		p.Add(func() error {
+			m.bloomFilter.Add(clientIP)
+			metric, err := m.GetMetric(metricRequestTotal)
+			if err != nil {
+				return err
+			}
+
+			return metric.Inc(nil)
+		})
 	}
 
 	// set uri request total
-	_ = m.GetMetric(metricURIRequestTotal).Inc([]string{ctx.FullPath(), r.Method, strconv.Itoa(w.Status())})
+	p.Add(func() error {
+		metric, err := m.GetMetric(metricRequestTotal)
+		if err != nil {
+			return err
+		}
+
+		return metric.Inc([]string{ctx.FullPath(), r.Method, strconv.Itoa(w.Status())})
+	})
 
 	// set request body size
 	// since r.ContentLength can be negative (in some occasions) guard the operation
 	if r.ContentLength >= 0 {
-		_ = m.GetMetric(metricRequestBody).Add(nil, float64(r.ContentLength))
+		p.Add(func() error {
+			metric, err := m.GetMetric(metricRequestTotal)
+			if err != nil {
+				return err
+			}
+
+			return metric.Add(nil, float64(r.ContentLength))
+		})
 	}
 
 	// set slow request
 	latency := time.Since(start)
 	if int32(latency.Seconds()) > m.slowTime {
-		_ = m.GetMetric(metricSlowRequest).Inc([]string{ctx.FullPath(), r.Method, strconv.Itoa(w.Status())})
+		p.Add(func() error {
+			metric, err := m.GetMetric(metricRequestTotal)
+			if err != nil {
+				return err
+			}
+
+			return metric.Inc([]string{ctx.FullPath(), r.Method, strconv.Itoa(w.Status())})
+		})
 	}
 
 	// set request duration
-	_ = m.GetMetric(metricRequestDuration).Observe([]string{ctx.FullPath()}, latency.Seconds())
+	p.Add(func() error {
+		metric, err := m.GetMetric(metricRequestTotal)
+		if err != nil {
+			return err
+		}
+
+		return metric.Observe([]string{ctx.FullPath()}, latency.Seconds())
+	})
 
 	// set response size
 	if w.Size() > 0 {
-		_ = m.GetMetric(metricResponseBody).Add(nil, float64(w.Size()))
+		p.Add(func() error {
+			metric, err := m.GetMetric(metricRequestTotal)
+			if err != nil {
+				return err
+			}
+
+			return metric.Add(nil, float64(w.Size()))
+		})
 	}
+
+	err := p.Wait()
+	if err != nil {
+		return err
+	}
+
+	return nil
 }

@@ -1,27 +1,28 @@
 # gin-metrics
+
 gin-gonic/gin metrics exporter for Prometheus.
 
+## Special Thanks
+This is project based from [here]("https://github.com/penglongli/gin-metrics")
 
 ## Introduction
 
-`gin-metrics` 为 gin HTTP 服务定义了一些监控指标，开箱即用。下边是默认监控指标的详细描述：  
+`gin-metrics` 为 gin HTTP 服务定义了一些监控指标，开箱即用。下边是默认监控指标的详细描述：
 
-
-| Metric                  | Type      | Description                                         |
-| ----------------------- | --------- | --------------------------------------------------- |
-| gin_request_total       | Counter   | 服务接收到的请求总数                |
-| gin_request_uv          | Counter   | 服务接收到的 IP 总数                     |
-| gin_uri_request_total   | Counter   | 每个 URI 接收到的服务请求数 |
-| gin_request_body_total  | Counter   | 服务接收到的请求量，单位: 字节   |
-| gin_response_body_total | Counter   | 服务返回的请求量，单位: 字节      |
+| Metric                  | Type      | Description                    |
+| ----------------------- | --------- | ------------------------------ |
+| gin_request_total       | Counter   | 服务接收到的请求总数           |
+| gin_request_uv          | Counter   | 服务接收到的 IP 总数           |
+| gin_uri_request_total   | Counter   | 每个 URI 接收到的服务请求数    |
+| gin_request_body_total  | Counter   | 服务接收到的请求量，单位: 字节 |
+| gin_response_body_total | Counter   | 服务返回的请求量，单位: 字节   |
 | gin_request_duration    | Histogram | 服务处理请求使用的时间         |
-| gin_slow_request_total  | Counter   | 服务接收到的慢请求计数     |
-
+| gin_slow_request_total  | Counter   | 服务接收到的慢请求计数         |
 
 ## Installation
 
 ```bash
-$ go get github.com/penglongli/gin-metrics
+$ go get github.com/muchtar-syarief/gin-metrics
 ```
 
 ## Usage
@@ -33,28 +34,31 @@ package main
 
 import (
 	"github.com/gin-gonic/gin"
-	
-	"github.com/penglongli/gin-metrics/ginmetrics"
+
+	"github.com/muchtar-syarief/gin-metrics/ginmetrics"
 )
 
 func main() {
 	r := gin.Default()
 
 	// get global Monitor object
-	m := ginmetrics.GetMonitor()
+	m := ginmetrics.NewDefaultMonitor()
 
-	// +optional set metric path, default /debug/metrics
-	m.SetMetricPath("/metrics")
-	// +optional set slow time, default 5s
-	m.SetSlowTime(10)
-	// +optional set request duration, default {0.1, 0.3, 1.2, 5, 10}
-	// used to p95, p99
-	m.SetDuration([]float64{0.1, 0.3, 1.2, 5, 10})
+	// use this function to register metric has define by repo
+	err := m.RegisterDefaultMetrics()
+	if err != nil {
+		panic(err)
+	}
 
-	// set middleware for gin
+	// if you want change the configuration you can use this function
+	m.SetMetricPath("/metrics"). // +optional set metric path, default /debug/metrics
+		SetSlowTime(10). // +optional set slow time, default 5s
+		SetDuration([]float64{0.1, 0.3, 1.2, 5, 10}) // +optional set request duration, default {0.1, 0.3, 1.2, 5, 10} used to p95, p99
+	
 	m.Use(r)
 
 	r.GET("/product/:id", func(ctx *gin.Context) {
+		ctx.JSON(200, map[string]string{
 			"productId": ctx.Param("id"),
 		})
 	})
@@ -81,16 +85,24 @@ gaugeMetric := &ginmetrics.Metric{
     Labels:      []string{"label1"},
 }
 
-// Add metric to global monitor object
-_ = ginmetrics.GetMonitor().AddMetric(gaugeMetric)
+// Add metric to monitor object
+_ = m.AddMetric(gaugeMetric)
 ```
 
-**SetGaugeValue** 
+**SetGaugeValue**
 
 `SetGaugeValue` 方法会直接设置监控指标的值
 
 ```go
-_ = ginmetrics.GetMonitor().GetMetric("example_gauge_metric").SetGaugeValue([]string{"label_value1"}, 0.1)
+metric, err := m.GetMetric("example_gauge_metric")
+if err != nil {
+	panic(err)
+}
+
+err =  metric.SetGaugeValue([]string{"label_value1"}, 0.1)
+if err != nil {
+	panic(err)
+}
 ```
 
 **Inc**
@@ -98,7 +110,15 @@ _ = ginmetrics.GetMonitor().GetMetric("example_gauge_metric").SetGaugeValue([]st
 `Inc` 方法会在监控指标值的基础上增加 1
 
 ```go
-_ = ginmetrics.GetMonitor().GetMetric("example_gauge_metric").Inc([]string{"label_value1"})
+metric, err := m.GetMetric("example_gauge_metric")
+if err != nil {
+	panic(err)
+}
+
+err = metric.Inc([]string{"label_value1"})
+if err != nil {
+	panic(err)
+}
 ```
 
 **Add**
@@ -106,13 +126,20 @@ _ = ginmetrics.GetMonitor().GetMetric("example_gauge_metric").Inc([]string{"labe
 `Add` 方法会为监控指标增加传入的值
 
 ```go
-_ = ginmetrics.GetMonitor().GetMetric("example_gauge_metric").Add([]string{"label_value1"}, 0.2)
+metric, err := m.GetMetric("example_gauge_metric")
+if err != nil {
+	panic(err)
+}
+
+err = metric.Add([]string{"label_value1"}, 0.2)
+if err != nil {
+	panic(err)
+}
 ```
 
 ### Counter
 
 `Counter` 类型的监控指标，可以使用 `Inc` 和 `Add` 方法，但是不能使用 `SetGaugeValue` 方法
-
 
 ### Histogram and Summary
 
@@ -120,6 +147,5 @@ _ = ginmetrics.GetMonitor().GetMetric("example_gauge_metric").Add([]string{"labe
 
 ## Contributing
 
-如果有遇见什么问题，或者需要修改，可以  [新建 ISSUE](https://github.com/penglongli/gin-metrics/issues/new) 
-或者 [新建 PullRequest](https://github.com/penglongli/gin-metrics/pulls). 
-
+如果有遇见什么问题，或者需要修改，可以 [新建 ISSUE](https://github.com/muchtar-syarief/gin-metrics/issues/new)
+或者 [新建 PullRequest](https://github.com/muchtar-syarief/gin-metrics/pulls).
