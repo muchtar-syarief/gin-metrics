@@ -125,6 +125,18 @@ func (m *Monitor) RegisterDefaultMetrics() error {
 	return m.initGinMetrics()
 }
 
+func (m *Monitor) SetPrefix(prefix string) {
+	for _, metric := range m.metrics {
+		metric.Name = MetricName(prefix) + metric.Name
+	}
+}
+
+func (m *Monitor) SetSuffix(suffix string) {
+	for _, metric := range m.metrics {
+		metric.Name += MetricName(suffix)
+	}
+}
+
 // GetMetric used to get metric object by metric_name.
 func (m *Monitor) GetMetric(name MetricName) (*Metric, error) {
 	metric, ok := m.metrics[name]
